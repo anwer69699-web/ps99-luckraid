@@ -1,178 +1,190 @@
 pcall(function()
 
---// Services
+--// SERVICES
 local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UIS = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
+local RS = game:GetService("ReplicatedStorage")
+local WS = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local Player = Players.LocalPlayer
 
---// Remotes
-local Network = ReplicatedStorage:WaitForChild("Network")
-local DamageRemote = Network:WaitForChild("Breakables_PlayerDealDamage")
+--// REMOTES
+local Net = RS:WaitForChild("Network")
+local DamageRemote = Net:WaitForChild("Breakables_PlayerDealDamage")
 
---// World
-local Breakables = Workspace:WaitForChild("__THINGS"):WaitForChild("Breakables")
+--// WORLD
+local Breakables = WS:WaitForChild("__THINGS"):WaitForChild("Breakables")
 
---// Settings 🔥 (مقفلة)
+--// SETTINGS
 local Settings = {
     Enabled = false,
-    Range = 3000,
-    MaxTargets = 60,
-    HitsPerFrame = 30,
-    FocusHits = 50,
-    CacheDelay = 0.1
+    RiskMode = false,
+    Range = 3500
 }
 
---// Cache
-local Cached = {}
-local Last = 0
-local index = 1
+local Cache = {}
+local pointer = 1
+local lastFire = 0
 
--- =====================================================
--- 🎯 TARGET SYSTEM
--- =====================================================
-
-local function GetTargets()
-    if tick() - Last < Settings.CacheDelay then
-        return Cached
-    end
-
-    Last = tick()
-    Cached = {}
+--// TARGET
+local function UpdateTargets()
+    table.clear(Cache)
 
     local char = Player.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return Cached end
+    if not hrp then return end
 
-    for _, obj in ipairs(Breakables:GetChildren()) do
-        local hit = obj:FindFirstChild("Hitbox", true)
+    local pos = hrp.Position
+
+    for _, v in ipairs(Breakables:GetChildren()) do
+        local hit = v:FindFirstChild("Hitbox", true)
         if hit then
-            if (hrp.Position - hit.Position).Magnitude <= Settings.Range then
-                table.insert(Cached, obj)
+            local dist = (pos - hit.Position).Magnitude
+            if dist < Settings.Range then
+                table.insert(Cache, {obj=v, dist=dist})
             end
         end
     end
 
-    return Cached
+    table.sort(Cache, function(a,b)
+        return a.dist < b.dist
+    end)
 end
 
--- =====================================================
--- ⚡ ENGINE (EVERY FRAME)
--- =====================================================
-
-RunService.Heartbeat:Connect(function()
+--// 🔥 AIRFLOW CORE (UPGRADED)
+local function Airflow()
     if not Settings.Enabled then return end
 
-    local targets = GetTargets()
-    if #targets == 0 then return end
+    local delay = Settings.RiskMode and 0.03 or 0.065
+    if tick() - lastFire < delay then return end
+    lastFire = tick()
 
-    -- 🎯 Focus (انستا تقريبًا)
-    local main = targets[1]
+    UpdateTargets()
+    local count = #Cache
+    if count == 0 then return end
+
+    -- 🎯 إعدادات ذكية
+    local burst = Settings.RiskMode and math.clamp(count * 1.5, 40, 90) or 25
+    local flow = Settings.RiskMode and math.clamp(count * 3, 80, 160) or 45
+
+    -- 🔥 Burst مركز
+    local main = Cache[1]
     if main then
-        for i = 1, Settings.FocusHits do
-            pcall(function()
-                DamageRemote:FireServer(main.Name)
-            end)
+        for i = 1, burst do
+            DamageRemote:FireServer(main.obj.Name)
         end
     end
 
-    -- ⚡ Multi Targets
-    for i = 1, Settings.HitsPerFrame do
-        local t = targets[index]
+    -- 🌊 Flow توزيع سريع
+    for i = 1, flow do
+        local t = Cache[pointer]
 
         if not t then
-            index = 1
-            t = targets[index]
+            pointer = 1
+            t = Cache[pointer]
         end
 
         if t then
-            pcall(function()
-                DamageRemote:FireServer(t.Name)
-            end)
+            DamageRemote:FireServer(t.obj.Name)
         end
 
-        index += 1
+        pointer += 1
+        if pointer > count then pointer = 1 end
     end
+
+    -- ⚡ Boost إضافي خفيف (Risk فقط)
+    if Settings.RiskMode and count > 3 then
+        for i = 1, 10 do
+            local rand = Cache[math.random(1, math.min(count, 5))]
+            if rand then
+                DamageRemote:FireServer(rand.obj.Name)
+            end
+        end
+    end
+end
+
+--// UI
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.Name = "AirflowMini"
+
+local main = Instance.new("Frame", gui)
+main.Size = UDim2.new(0, 220, 0, 140)
+main.Position = UDim2.new(0.5, -110, 0.5, -70)
+main.BackgroundColor3 = Color3.fromRGB(18,18,26)
+main.Active = true
+main.Draggable = true
+
+Instance.new("UICorner", main).CornerRadius = UDim.new(0,10)
+
+local stroke = Instance.new("UIStroke", main)
+stroke.Color = Color3.fromRGB(120,170,255)
+stroke.Transparency = 0.5
+stroke.Thickness = 1.2
+
+--// 🌈 TITLE (ULTRA SMOOTH RAINBOW)
+
+local title = Instance.new("TextLabel", main)
+title.Size = UDim2.new(1,0,0,30)
+title.BackgroundTransparency = 1
+title.Text = "Auto Tap Hub"
+title.TextScaled = true
+title.Font = Enum.Font.GothamBold
+title.TextColor3 = Color3.new(1,1,1)
+
+local rainbow = Instance.new("UIGradient", title)
+rainbow.Rotation = 45
+
+local hue = 0
+
+RunService.RenderStepped:Connect(function(dt)
+    hue += dt * 0.15 -- أبطأ = أفخم
+
+    if hue > 1 then hue -= 1 end
+
+    rainbow.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0, Color3.fromHSV(hue,1,1)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromHSV((hue+0.15)%1,1,1)),
+        ColorSequenceKeypoint.new(1, Color3.fromHSV((hue+0.3)%1,1,1))
+    }
 end)
 
+--// BUTTONS
 
+local function createButton(text, y, callback)
+    local btn = Instance.new("TextButton", main)
+    btn.Size = UDim2.new(1,-20,0,40)
+    btn.Position = UDim2.new(0,10,0,y)
+    btn.Text = text.." : OFF"
+    btn.TextColor3 = Color3.fromRGB(255,255,255)
+    btn.BackgroundColor3 = Color3.fromRGB(40,40,60)
 
--- =====================================================
--- 🎨 UI
--- =====================================================
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
 
-local ScreenGui = Instance.new("ScreenGui", CoreGui)
+    local state = false
 
-local Main = Instance.new("Frame", ScreenGui)
-Main.Size = UDim2.new(0, 260, 0, 140)
-Main.Position = UDim2.new(0.5, -130, 0.5, -70)
-Main.BackgroundColor3 = Color3.fromRGB(20,20,30)
-Instance.new("UICorner", Main)
+    btn.MouseButton1Click:Connect(function()
+        state = not state
 
-local Title = Instance.new("TextLabel", Main)
-Title.Size = UDim2.new(1,0,0,40)
-Title.BackgroundColor3 = Color3.fromRGB(30,30,45)
-Title.Text = "🔥 clan script Auto Tap 30s raid max dmg 14 pet"
-Title.TextColor3 = Color3.new(1,1,1)
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 7
+        btn.Text = text.." : "..(state and "ON" or "OFF")
 
-local Toggle = Instance.new("TextButton", Main)
-Toggle.Size = UDim2.new(0,180,0,50)
-Toggle.Position = UDim2.new(0.5,-90,0.5,-10)
-Toggle.BackgroundColor3 = Color3.fromRGB(200,60,60)
-Toggle.Text = "OFF"
-Toggle.TextColor3 = Color3.new(1,1,1)
-Toggle.Font = Enum.Font.GothamBold
-Toggle.TextSize = 20
-Instance.new("UICorner", Toggle)
+        TweenService:Create(btn, TweenInfo.new(0.2), {
+            BackgroundColor3 = state and Color3.fromRGB(70,140,255) or Color3.fromRGB(40,40,60)
+        }):Play()
 
-Toggle.MouseButton1Click:Connect(function()
-    Settings.Enabled = not Settings.Enabled
+        callback(state)
+    end)
+end
 
-    if Settings.Enabled then
-        Toggle.Text = "ON"
-        Toggle.BackgroundColor3 = Color3.fromRGB(60,180,60)
-    else
-        Toggle.Text = "OFF"
-        Toggle.BackgroundColor3 = Color3.fromRGB(200,60,60)
-    end
+createButton("ENABLE", 35, function(v)
+    Settings.Enabled = v
 end)
 
--- =====================================================
--- 🖱 DRAG
--- =====================================================
-
-local dragging, dragStart, startPos
-
-Title.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        dragStart = input.Position
-        startPos = Main.Position
-    end
+createButton("OP MODE", 80, function(v)
+    Settings.RiskMode = v
 end)
 
-UIS.InputChanged:Connect(function(input)
-    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-        local delta = input.Position - dragStart
-        Main.Position = UDim2.new(
-            startPos.X.Scale,
-            startPos.X.Offset + delta.X,
-            startPos.Y.Scale,
-            startPos.Y.Offset + delta.Y
-        )
-    end
-end)
-
-UIS.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = false
-    end
-end)
+--// LOOP
+RunService.Heartbeat:Connect(Airflow)
 
 end)
