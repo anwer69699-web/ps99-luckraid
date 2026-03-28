@@ -1,0 +1,178 @@
+pcall(function()
+
+--// Services
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local RunService = game:GetService("RunService")
+
+local Player = Players.LocalPlayer
+
+--// Remotes
+local Network = ReplicatedStorage:WaitForChild("Network")
+local DamageRemote = Network:WaitForChild("Breakables_PlayerDealDamage")
+
+--// World
+local Breakables = Workspace:WaitForChild("__THINGS"):WaitForChild("Breakables")
+
+--// Settings 🔥 (مقفلة)
+local Settings = {
+    Enabled = false,
+    Range = 3000,
+    MaxTargets = 60,
+    HitsPerFrame = 30,
+    FocusHits = 50,
+    CacheDelay = 0.1
+}
+
+--// Cache
+local Cached = {}
+local Last = 0
+local index = 1
+
+-- =====================================================
+-- 🎯 TARGET SYSTEM
+-- =====================================================
+
+local function GetTargets()
+    if tick() - Last < Settings.CacheDelay then
+        return Cached
+    end
+
+    Last = tick()
+    Cached = {}
+
+    local char = Player.Character
+    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return Cached end
+
+    for _, obj in ipairs(Breakables:GetChildren()) do
+        local hit = obj:FindFirstChild("Hitbox", true)
+        if hit then
+            if (hrp.Position - hit.Position).Magnitude <= Settings.Range then
+                table.insert(Cached, obj)
+            end
+        end
+    end
+
+    return Cached
+end
+
+-- =====================================================
+-- ⚡ ENGINE (EVERY FRAME)
+-- =====================================================
+
+RunService.Heartbeat:Connect(function()
+    if not Settings.Enabled then return end
+
+    local targets = GetTargets()
+    if #targets == 0 then return end
+
+    -- 🎯 Focus (انستا تقريبًا)
+    local main = targets[1]
+    if main then
+        for i = 1, Settings.FocusHits do
+            pcall(function()
+                DamageRemote:FireServer(main.Name)
+            end)
+        end
+    end
+
+    -- ⚡ Multi Targets
+    for i = 1, Settings.HitsPerFrame do
+        local t = targets[index]
+
+        if not t then
+            index = 1
+            t = targets[index]
+        end
+
+        if t then
+            pcall(function()
+                DamageRemote:FireServer(t.Name)
+            end)
+        end
+
+        index += 1
+    end
+end)
+
+
+
+-- =====================================================
+-- 🎨 UI
+-- =====================================================
+
+local ScreenGui = Instance.new("ScreenGui", CoreGui)
+
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.new(0, 260, 0, 140)
+Main.Position = UDim2.new(0.5, -130, 0.5, -70)
+Main.BackgroundColor3 = Color3.fromRGB(20,20,30)
+Instance.new("UICorner", Main)
+
+local Title = Instance.new("TextLabel", Main)
+Title.Size = UDim2.new(1,0,0,40)
+Title.BackgroundColor3 = Color3.fromRGB(30,30,45)
+Title.Text = "🔥 clan script Auto Tap 30s raid max dmg 14 pet"
+Title.TextColor3 = Color3.new(1,1,1)
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 7
+
+local Toggle = Instance.new("TextButton", Main)
+Toggle.Size = UDim2.new(0,180,0,50)
+Toggle.Position = UDim2.new(0.5,-90,0.5,-10)
+Toggle.BackgroundColor3 = Color3.fromRGB(200,60,60)
+Toggle.Text = "OFF"
+Toggle.TextColor3 = Color3.new(1,1,1)
+Toggle.Font = Enum.Font.GothamBold
+Toggle.TextSize = 20
+Instance.new("UICorner", Toggle)
+
+Toggle.MouseButton1Click:Connect(function()
+    Settings.Enabled = not Settings.Enabled
+
+    if Settings.Enabled then
+        Toggle.Text = "ON"
+        Toggle.BackgroundColor3 = Color3.fromRGB(60,180,60)
+    else
+        Toggle.Text = "OFF"
+        Toggle.BackgroundColor3 = Color3.fromRGB(200,60,60)
+    end
+end)
+
+-- =====================================================
+-- 🖱 DRAG
+-- =====================================================
+
+local dragging, dragStart, startPos
+
+Title.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
+    end
+end)
+
+UIS.InputChanged:Connect(function(input)
+    if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = false
+    end
+end)
+
+end)
