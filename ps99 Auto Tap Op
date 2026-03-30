@@ -1,178 +1,725 @@
 pcall(function()
-
--- SERVICES
-local Players = game:GetService("Players")
-local RS = game:GetService("ReplicatedStorage")
-local WS = game:GetService("Workspace")
-local RunService = game:GetService("RunService")
-
-local Player = Players.LocalPlayer
-
--- REMOTES
-local Net = RS:WaitForChild("Network")
-local DamageRemote = Net:WaitForChild("Breakables_PlayerDealDamage")
-local CollectRemote = Net:WaitForChild("Orbs: Collect")
-
--- WORLD
-local Breakables = WS:WaitForChild("__THINGS"):WaitForChild("Breakables")
-local Orbs = WS:WaitForChild("__THINGS"):WaitForChild("Orbs")
-local Lootbags = WS:WaitForChild("__THINGS"):WaitForChild("Lootbags")
-
--- STATE
-local AutoTap = false
-local TapTeleport = false
-local AutoCollect = false
-
--- SETTINGS
-local RANGE = 5000
-local BASE_BURST = 25
-
--- CHARACTER
-local function GetRoot()
-    local char = Player.Character or Player.CharacterAdded:Wait()
-    return char:WaitForChild("HumanoidRootPart")
-end
-
--- 🧠 SMART TARGET
-local function GetTarget()
-    local best, bestScore = nil, math.huge
-    local root = GetRoot()
-
-    for _, v in ipairs(Breakables:GetChildren()) do
-        local hitbox = v:FindFirstChild("Hitbox", true)
-        if hitbox then
-            local dist = (root.Position - hitbox.Position).Magnitude
-            if dist <= RANGE then
-                local hpObj = v:FindFirstChild("Health", true)
-                local hp = hpObj and hpObj.Value or 999999
-
-                local score = hp + (dist * 2)
-
-                if score < bestScore then
-                    bestScore = score
-                    best = v
+    local Players = game:GetService("Players")
+    local RS = game:GetService("ReplicatedStorage")
+    local WS = game:GetService("Workspace")
+    local RunService = game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
+    local UserInputService = game:GetService("UserInputService")
+    local VirtualUser = game:GetService("VirtualUser")
+    local CoreGui = game:GetService("CoreGui")
+    
+    local Player = Players.LocalPlayer
+    
+    -- Cleanup
+    for _, gui in ipairs(CoreGui:GetChildren()) do
+        if gui.Name == "AIRFLOW_NATURAL" then
+            pcall(function() gui:Destroy() end)
+        end
+    end
+    
+    -- Services
+    local Net = RS:WaitForChild("Network")
+    local DamageRemote = Net:WaitForChild("Breakables_PlayerDealDamage")
+    local CollectRemote = Net:WaitForChild("Orbs: Collect")
+    
+    local Breakables = WS:WaitForChild("__THINGS"):WaitForChild("Breakables")
+    local Orbs = WS:WaitForChild("__THINGS"):WaitForChild("Orbs")
+    local Lootbags = WS:WaitForChild("__THINGS"):WaitForChild("Lootbags")
+    
+    -- Settings
+    local Settings = {
+        AutoTap = false,
+        TapTeleport = false,
+        AutoCollect = false,
+        AntiAFK = true,
+        
+        -- Farm Settings
+        RANGE = 5000,
+        BASE_BURST = 50,
+        TELEPORT_HEIGHT = 4,
+        
+        -- Velocity Collect Settings
+        VELOCITY_SPEED = 200, -- سرعة الطيران نحو اللاعب
+        MAX_DISTANCE = 999999,
+        STOP_DISTANCE = 2, -- يوقف عند 2 ستود ويخلي اللعبة تجمعهم
+        
+        -- Target Priority
+        PRIORITY_SMALL = true
+    }
+    
+    local Stats = {Orbs = 0, Lootbags = 0, Taps = 0, Start = tick()}
+    
+    -- Character
+    local function GetRoot()
+        local char = Player.Character or Player.CharacterAdded:Wait()
+        return char:WaitForChild("HumanoidRootPart")
+    end
+    
+    -- ═══════════════════════════════════════════════════════════════
+    --                     TARGET SYSTEM - FOCUS ONE
+    -- ═══════════════════════════════════════════════════════════════
+    
+    local CurrentTarget = nil
+    
+    local function GetBestTarget()
+        local root = GetRoot()
+        local best, bestScore = nil, math.huge
+        
+        if CurrentTarget and CurrentTarget.Parent then
+            local hpObj = CurrentTarget:FindFirstChild("Health", true)
+            local hp = hpObj and hpObj.Value or 0
+            if hp > 0 then
+                local hitbox = CurrentTarget:FindFirstChild("Hitbox", true)
+                if hitbox then
+                    local dist = (root.Position - hitbox.Position).Magnitude
+                    if dist <= Settings.RANGE then
+                        return CurrentTarget
+                    end
                 end
             end
         end
-    end
-
-    return best
-end
-
--- 💀 AUTO TAP
-RunService.Heartbeat:Connect(function()
-    if not AutoTap then return end
-
-    local target = GetTarget()
-    if not target then return end
-
-    local hitbox = target:FindFirstChild("Hitbox", true)
-    if not hitbox then return end
-
-    if TapTeleport then
-        pcall(function()
-            GetRoot().CFrame = hitbox.CFrame + Vector3.new(0,3,0)
-        end)
-    end
-
-    local hpObj = target:FindFirstChild("Health", true)
-    local hp = hpObj and hpObj.Value or 999999
-
-    local burst = BASE_BURST
-    if hp < 5000 then
-        burst = BASE_BURST * 2
-    elseif hp < 20000 then
-        burst = BASE_BURST * 1.5
-    end
-
-    for i = 1, burst do
-        pcall(function()
-            DamageRemote:FireServer(target.Name)
-        end)
-    end
-end)
-
--- 💰 AUTO COLLECT
-task.spawn(function()
-    while true do
-        if AutoCollect then
-            local ids = {}
-
-            for _, orb in ipairs(Orbs:GetChildren()) do
-                local id = tonumber(orb.Name)
-                if id then
-                    table.insert(ids, id)
-                    orb:Destroy()
+        
+        for _, v in ipairs(Breakables:GetChildren()) do
+            local hitbox = v:FindFirstChild("Hitbox", true)
+            if hitbox then
+                local dist = (root.Position - hitbox.Position).Magnitude
+                if dist <= Settings.RANGE then
+                    local hpObj = v:FindFirstChild("Health", true)
+                    local maxHpObj = v:FindFirstChild("MaxHealth", true)
+                    local hp = hpObj and hpObj.Value or 999999
+                    local maxHp = maxHpObj and maxHpObj.Value or hp
+                    
+                    if hp > 0 then
+                        local score = dist
+                        
+                        if Settings.PRIORITY_SMALL then
+                            if maxHp < 5000 then
+                                score = score * 0.2
+                            elseif maxHp < 20000 then
+                                score = score * 0.5
+                            end
+                        end
+                        
+                        if score < bestScore then
+                            bestScore = score
+                            best = v
+                        end
+                    end
                 end
             end
-
-            if #ids > 0 then
-                pcall(function()
-                    CollectRemote:FireServer(ids)
-                end)
-            end
-
-            for _, bag in ipairs(Lootbags:GetChildren()) do
-                bag:Destroy()
-            end
         end
-
-        task.wait(0.1)
+        
+        CurrentTarget = best
+        return best
     end
-end)
-
--- ⚡ Collect عند السبون
-Orbs.ChildAdded:Connect(function(orb)
-    if AutoCollect then
-        task.wait()
-        local id = tonumber(orb.Name)
-        if id then
+    
+    -- ═══════════════════════════════════════════════════════════════
+    --                     AUTO TAP - POWERFUL
+    -- ═══════════════════════════════════════════════════════════════
+    
+    RunService.Heartbeat:Connect(function()
+        if not Settings.AutoTap then return end
+        
+        local target = GetBestTarget()
+        if not target then return end
+        
+        local hitbox = target:FindFirstChild("Hitbox", true)
+        if not hitbox then return end
+        
+        if Settings.TapTeleport then
             pcall(function()
-                CollectRemote:FireServer({id})
+                local root = GetRoot()
+                local targetPos = hitbox.Position
+                root.CFrame = CFrame.new(targetPos.X, targetPos.Y + Settings.TELEPORT_HEIGHT, targetPos.Z)
             end)
-            orb:Destroy()
+        end
+        
+        local hpObj = target:FindFirstChild("Health", true)
+        local hp = hpObj and hpObj.Value or 999999
+        
+        local burst = Settings.BASE_BURST
+        if hp < 3000 then
+            burst = burst * 4
+        elseif hp < 10000 then
+            burst = burst * 2
+        end
+        
+        for i = 1, burst do
+            pcall(function()
+                DamageRemote:FireServer(target.Name)
+                Stats.Taps = Stats.Taps + 1
+            end)
+        end
+    end)
+    
+    -- ═══════════════════════════════════════════════════════════════
+    --                     NATURAL VELOCITY SYSTEM
+    --              يدفع الأوربس واللوتباجز بسرعة عالية
+    --         لما يوصلوا لـ 2 ستود، يوقف التحريك ويخلي اللعبة تجمعهم
+    -- ═══════════════════════════════════════════════════════════════
+    
+    local TrackedItems = {}
+    
+    local function PushOrbToPlayer(orb)
+        if not orb or not orb.Parent then return end
+        if not Settings.AutoCollect then return end
+        
+        local root = GetRoot()
+        local orbId = tonumber(orb.Name)
+        if not orbId then return end
+        
+        -- لو قريب جداً (2 ستود أو أقل)، وقف التحريك وخلي اللعبة تجمعه
+        local dist = (orb.Position - root.Position).Magnitude
+        if dist <= Settings.STOP_DISTANCE then
+            -- وقف التحريك وخلي اللعبة تتولى
+            pcall(function()
+                orb.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                -- لا تسوي destroy هنا، خل اللعبة تجمعه طبيعي
+            end)
+            return
+        end
+        
+        -- لو بعيد، شغل Velocity
+        if not TrackedItems[orb] then
+            TrackedItems[orb] = true
+            
+            task.spawn(function()
+                local reached = false
+                
+                while orb and orb.Parent and Settings.AutoCollect and not reached do
+                    local playerPos = GetRoot().Position
+                    local orbPos = orb.Position
+                    local direction = (playerPos - orbPos).Unit
+                    local currentDist = (playerPos - orbPos).Magnitude
+                    
+                    -- إذا وصل لـ 2 ستود، وقف التحريك
+                    if currentDist <= Settings.STOP_DISTANCE then
+                        pcall(function()
+                            orb.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end)
+                        reached = true
+                        break
+                    end
+                    
+                    -- سرعة عالية نحو اللاعب
+                    local velocity = direction * Settings.VELOCITY_SPEED
+                    
+                    pcall(function()
+                        orb.AssemblyLinearVelocity = velocity
+                    end)
+                    
+                    RunService.Heartbeat:Wait()
+                end
+                
+                TrackedItems[orb] = nil
+            end)
         end
     end
-end)
-
--- 🖥️ GUI بسيط
-local gui = Instance.new("ScreenGui", game.CoreGui)
-gui.Name = "ARBIX_SIMPLE"
-
-local frame = Instance.new("Frame", gui)
-frame.Size = UDim2.new(0, 260, 0, 170)
-frame.Position = UDim2.new(0.5,-130,0.5,-85)
-frame.BackgroundColor3 = Color3.fromRGB(25,25,35)
-frame.Active = true
-frame.Draggable = true
-Instance.new("UICorner", frame)
-
-local title = Instance.new("TextLabel", frame)
-title.Size = UDim2.new(1,0,0,30)
-title.BackgroundTransparency = 1
-title.Text = "ARBIX SIMPLE"
-title.TextColor3 = Color3.new(1,1,1)
-title.TextScaled = true
-
-local function Button(name, y, callback)
-    local btn = Instance.new("TextButton", frame)
-    btn.Size = UDim2.new(1,-20,0,35)
-    btn.Position = UDim2.new(0,10,0,y)
-    btn.BackgroundColor3 = Color3.fromRGB(40,40,60)
-    btn.TextColor3 = Color3.new(1,1,1)
-    btn.Text = name..": OFF"
-    Instance.new("UICorner", btn)
-
-    local state = false
-    btn.MouseButton1Click:Connect(function()
-        state = not state
-        btn.Text = name..": "..(state and "ON" or "OFF")
-        callback(state)
+    
+    local function PushLootbagToPlayer(bag)
+        if not bag or not bag.Parent then return end
+        if not Settings.AutoCollect then return end
+        
+        local root = GetRoot()
+        local dist = (bag.Position - root.Position).Magnitude
+        
+        if dist <= Settings.STOP_DISTANCE then
+            pcall(function()
+                bag.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            end)
+            return
+        end
+        
+        if not TrackedItems[bag] then
+            TrackedItems[bag] = true
+            
+            task.spawn(function()
+                local reached = false
+                
+                while bag and bag.Parent and Settings.AutoCollect and not reached do
+                    local playerPos = GetRoot().Position
+                    local bagPos = bag.Position
+                    local direction = (playerPos - bagPos).Unit
+                    local currentDist = (playerPos - bagPos).Magnitude
+                    
+                    if currentDist <= Settings.STOP_DISTANCE then
+                        pcall(function()
+                            bag.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end)
+                        reached = true
+                        break
+                    end
+                    
+                    local velocity = direction * Settings.VELOCITY_SPEED
+                    
+                    pcall(function()
+                        bag.AssemblyLinearVelocity = velocity
+                    end)
+                    
+                    RunService.Heartbeat:Wait()
+                end
+                
+                TrackedItems[bag] = nil
+            end)
+        end
+    end
+    
+    -- مراقبة الأوربس الجديدة
+    Orbs.ChildAdded:Connect(function(orb)
+        if not Settings.AutoCollect then return end
+        task.spawn(function()
+            task.wait(0.01)
+            PushOrbToPlayer(orb)
+        end)
     end)
-end
-
-Button("Auto Tap", 45, function(v) AutoTap = v end)
-Button("Teleport", 85, function(v) TapTeleport = v end)
-Button("Auto Collect", 125, function(v) AutoCollect = v end)
-
+    
+    -- مراقبة اللوتباجز الجديدة
+    Lootbags.ChildAdded:Connect(function(bag)
+        if not Settings.AutoCollect then return end
+        task.spawn(function()
+            task.wait(0.01)
+            PushLootbagToPlayer(bag)
+        end)
+    end)
+    
+    -- نظام جمع الدفعات للأشياء القريبة (يحسبهم بس، ما يدمرهم)
+    task.spawn(function()
+        while true do
+            if Settings.AutoCollect then
+                local root = GetRoot()
+                local nearbyOrbs = 0
+                local nearbyBags = 0
+                
+                -- عد الأوربس القريبة (2 ستود أو أقل)
+                for _, orb in ipairs(Orbs:GetChildren()) do
+                    local dist = (orb.Position - root.Position).Magnitude
+                    if dist <= Settings.STOP_DISTANCE + 1 then
+                        nearbyOrbs = nearbyOrbs + 1
+                        -- وقف التحريك
+                        pcall(function()
+                            orb.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end)
+                    else
+                        PushOrbToPlayer(orb)
+                    end
+                end
+                
+                -- عد اللوتباجز القريبة
+                for _, bag in ipairs(Lootbags:GetChildren()) do
+                    local dist = (bag.Position - root.Position).Magnitude
+                    if dist <= Settings.STOP_DISTANCE + 1 then
+                        nearbyBags = nearbyBags + 1
+                        pcall(function()
+                            bag.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                        end)
+                    else
+                        PushLootbagToPlayer(bag)
+                    end
+                end
+                
+                -- تحديث الإحصائيات (تقديرية)
+                Stats.Orbs = Stats.Orbs + nearbyOrbs
+                Stats.Lootbags = Stats.Lootbags + nearbyBags
+            end
+            task.wait(0.05)
+        end
+    end)
+    
+    -- Anti-AFK
+    if Settings.AntiAFK then
+        Player.Idled:Connect(function()
+            VirtualUser:Button2Down(Vector2.new(0, 0), WS.CurrentCamera.CFrame)
+            wait(0.2)
+            VirtualUser:Button2Up(Vector2.new(0, 0), WS.CurrentCamera.CFrame)
+        end)
+    end
+    
+    -- ═══════════════════════════════════════════════════════════════
+    --                     PROFESSIONAL UI
+    -- ═══════════════════════════════════════════════════════════════
+    
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "AIRFLOW_NATURAL"
+    gui.Parent = CoreGui
+    gui.ResetOnSpawn = false
+    
+    local main = Instance.new("Frame", gui)
+    main.Size = UDim2.new(0, 400, 0, 300)
+    main.Position = UDim2.new(0.5, -200, 0.5, -150)
+    main.BackgroundColor3 = Color3.fromRGB(10, 10, 18)
+    main.BorderSizePixel = 0
+    main.Active = true
+    main.ClipsDescendants = true
+    Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
+    
+    -- Glow
+    local glow = Instance.new("ImageLabel", main)
+    glow.AnchorPoint = Vector2.new(0.5, 0.5)
+    glow.Position = UDim2.new(0.5, 0, 0.5, 0)
+    glow.Size = UDim2.new(1, 40, 1, 40)
+    glow.BackgroundTransparency = 1
+    glow.Image = "rbxassetid://5554236805"
+    glow.ImageColor3 = Color3.fromRGB(0, 200, 255)
+    glow.ImageTransparency = 0.85
+    glow.ScaleType = Enum.ScaleType.Slice
+    glow.SliceCenter = Rect.new(23, 23, 277, 277)
+    glow.ZIndex = -1
+    
+    -- Header
+    local header = Instance.new("Frame", main)
+    header.Size = UDim2.new(1, 0, 0, 45)
+    header.BackgroundColor3 = Color3.fromRGB(16, 16, 28)
+    
+    local title = Instance.new("TextLabel", header)
+    title.Size = UDim2.new(0, 200, 1, 0)
+    title.Position = UDim2.new(0, 15, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "AIRFLOW NATURAL"
+    title.TextColor3 = Color3.fromRGB(0, 220, 255)
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 18
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    
+    -- Pulse
+    task.spawn(function()
+        while gui and gui.Parent do
+            TweenService:Create(title, TweenInfo.new(0.7), {TextColor3 = Color3.fromRGB(255, 0, 200)}):Play()
+            wait(0.7)
+            TweenService:Create(title, TweenInfo.new(0.7), {TextColor3 = Color3.fromRGB(0, 220, 255)}):Play()
+            wait(0.7)
+        end
+    end)
+    
+    -- Close & Minimize
+    local closeBtn = Instance.new("TextButton", header)
+    closeBtn.Size = UDim2.new(0, 28, 0, 28)
+    closeBtn.Position = UDim2.new(1, -38, 0, 8)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    closeBtn.Text = "×"
+    closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    closeBtn.Font = Enum.Font.GothamBlack
+    closeBtn.TextSize = 16
+    Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+    
+    local minBtn = Instance.new("TextButton", header)
+    minBtn.Size = UDim2.new(0, 28, 0, 28)
+    minBtn.Position = UDim2.new(1, -70, 0, 8)
+    minBtn.BackgroundColor3 = Color3.fromRGB(255, 160, 0)
+    minBtn.Text = "−"
+    minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    minBtn.Font = Enum.Font.GothamBlack
+    minBtn.TextSize = 18
+    Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
+    
+    -- Sidebar
+    local sidebar = Instance.new("Frame", main)
+    sidebar.Size = UDim2.new(0, 110, 1, -45)
+    sidebar.Position = UDim2.new(0, 0, 0, 45)
+    sidebar.BackgroundColor3 = Color3.fromRGB(13, 13, 22)
+    
+    -- Content
+    local content = Instance.new("Frame", main)
+    content.Size = UDim2.new(1, -110, 1, -45)
+    content.Position = UDim2.new(0, 110, 0, 45)
+    content.BackgroundTransparency = 1
+    
+    -- Tabs
+    local Tabs = {}
+    local CurrentTab = nil
+    
+    local function CreateTab(name, order)
+        local btn = Instance.new("TextButton", sidebar)
+        btn.Size = UDim2.new(1, -8, 0, 36)
+        btn.Position = UDim2.new(0, 4, 0, 8 + (order * 40))
+        btn.BackgroundColor3 = Color3.fromRGB(25, 25, 40)
+        btn.Text = name
+        btn.TextColor3 = Color3.fromRGB(150, 150, 170)
+        btn.Font = Enum.Font.GothamBold
+        btn.TextSize = 11
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+        
+        local frame = Instance.new("ScrollingFrame", content)
+        frame.Size = UDim2.new(1, 0, 1, 0)
+        frame.BackgroundTransparency = 1
+        frame.ScrollBarThickness = 2
+        frame.Visible = false
+        frame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        
+        local list = Instance.new("UIListLayout", frame)
+        list.Padding = UDim.new(0, 8)
+        list.SortOrder = Enum.SortOrder.LayoutOrder
+        list.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        
+        Instance.new("UIPadding", frame).PaddingTop = UDim.new(0, 8)
+        
+        btn.MouseButton1Click:Connect(function()
+            CurrentTab = frame
+            for _, t in ipairs(Tabs) do
+                t.Frame.Visible = (t.Frame == frame)
+                t.Button.BackgroundColor3 = (t.Frame == frame) and Color3.fromRGB(40, 40, 65) or Color3.fromRGB(25, 25, 40)
+                t.Button.TextColor3 = (t.Frame == frame) and Color3.fromRGB(0, 220, 255) or Color3.fromRGB(150, 150, 170)
+            end
+        end)
+        
+        table.insert(Tabs, {Button = btn, Frame = frame})
+        return frame
+    end
+    
+    -- Toggle
+    local function CreateToggle(parent, text, key)
+        local frame = Instance.new("Frame", parent)
+        frame.Size = UDim2.new(1, -12, 0, 48)
+        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+        
+        local label = Instance.new("TextLabel", frame)
+        label.Size = UDim2.new(0.6, 0, 1, 0)
+        label.Position = UDim2.new(0, 12, 0, 0)
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = Color3.fromRGB(200, 200, 220)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 12
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        
+        local toggle = Instance.new("TextButton", frame)
+        toggle.Size = UDim2.new(0, 52, 0, 26)
+        toggle.Position = UDim2.new(1, -62, 0.5, -13)
+        toggle.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+        toggle.Text = "OFF"
+        toggle.TextColor3 = Color3.fromRGB(130, 130, 150)
+        toggle.Font = Enum.Font.GothamBold
+        toggle.TextSize = 10
+        Instance.new("UICorner", toggle).CornerRadius = UDim.new(0, 13)
+        
+        local circle = Instance.new("Frame", toggle)
+        circle.Size = UDim2.new(0, 20, 0, 20)
+        circle.Position = UDim2.new(0, 3, 0.5, -10)
+        circle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
+        
+        toggle.MouseButton1Click:Connect(function()
+            Settings[key] = not Settings[key]
+            if Settings[key] then
+                TweenService:Create(toggle, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(0, 200, 100)}):Play()
+                TweenService:Create(circle, TweenInfo.new(0.2), {Position = UDim2.new(0, 29, 0.5, -10)}):Play()
+                toggle.Text = "ON"
+                toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+            else
+                TweenService:Create(toggle, TweenInfo.new(0.2), {BackgroundColor3 = Color3.fromRGB(40, 40, 60)}):Play()
+                TweenService:Create(circle, TweenInfo.new(0.2), {Position = UDim2.new(0, 3, 0.5, -10)}):Play()
+                toggle.Text = "OFF"
+                toggle.TextColor3 = Color3.fromRGB(130, 130, 150)
+            end
+        end)
+        return frame
+    end
+    
+    -- Slider
+    local function CreateSlider(parent, text, key, min, max, default)
+        local frame = Instance.new("Frame", parent)
+        frame.Size = UDim2.new(1, -12, 0, 65)
+        frame.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 10)
+        
+        local label = Instance.new("TextLabel", frame)
+        label.Size = UDim2.new(0.5, 0, 0, 20)
+        label.Position = UDim2.new(0, 12, 0, 5)
+        label.BackgroundTransparency = 1
+        label.Text = text
+        label.TextColor3 = Color3.fromRGB(200, 200, 220)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 11
+        label.TextXAlignment = Enum.TextXAlignment.Left
+        
+        local valueBox = Instance.new("TextLabel", frame)
+        valueBox.Size = UDim2.new(0, 40, 0, 20)
+        valueBox.Position = UDim2.new(1, -52, 0, 5)
+        valueBox.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+        valueBox.Text = tostring(default)
+        valueBox.TextColor3 = Color3.fromRGB(0, 220, 255)
+        valueBox.Font = Enum.Font.GothamBold
+        valueBox.TextSize = 11
+        Instance.new("UICorner", valueBox).CornerRadius = UDim.new(0, 6)
+        
+        local sliderBg = Instance.new("Frame", frame)
+        sliderBg.Size = UDim2.new(1, -20, 0, 6)
+        sliderBg.Position = UDim2.new(0, 10, 0, 35)
+        sliderBg.BackgroundColor3 = Color3.fromRGB(30, 30, 50)
+        Instance.new("UICorner", sliderBg).CornerRadius = UDim.new(0, 3)
+        
+        local fill = Instance.new("Frame", sliderBg)
+        fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
+        fill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+        Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
+        
+        local handle = Instance.new("Frame", sliderBg)
+        handle.Size = UDim2.new(0, 14, 0, 14)
+        handle.Position = UDim2.new((default - min) / (max - min), -7, 0.5, -7)
+        handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        Instance.new("UICorner", handle).CornerRadius = UDim.new(1, 0)
+        
+        local dragging = false
+        local dragArea = Instance.new("TextButton", frame)
+        dragArea.Size = UDim2.new(1, -20, 0, 28)
+        dragArea.Position = UDim2.new(0, 10, 0, 22)
+        dragArea.BackgroundTransparency = 1
+        dragArea.Text = ""
+        
+        local function Update(val)
+            val = math.clamp(val, min, max)
+            local pct = (val - min) / (max - min)
+            fill.Size = UDim2.new(pct, 0, 1, 0)
+            handle.Position = UDim2.new(pct, -7, 0.5, -7)
+            valueBox.Text = string.format("%.0f", val)
+            Settings[key] = val
+        end
+        
+        dragArea.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true
+                local pos = input.Position.X
+                local sp = sliderBg.AbsolutePosition.X
+                local sw = sliderBg.AbsoluteSize.X
+                Update(min + (max - min) * math.clamp((pos - sp) / sw, 0, 1))
+            end
+        end)
+        
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local pos = input.Position.X
+                local sp = sliderBg.AbsolutePosition.X
+                local sw = sliderBg.AbsoluteSize.X
+                Update(min + (max - min) * math.clamp((pos - sp) / sw, 0, 1))
+            end
+        end)
+        
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+        end)
+        return frame
+    end
+    
+    -- Stat
+    local function CreateStat(parent, title, color, yPos)
+        local card = Instance.new("Frame", parent)
+        card.Size = UDim2.new(1, -12, 0, 55)
+        card.Position = UDim2.new(0, 6, 0, yPos)
+        card.BackgroundColor3 = Color3.fromRGB(20, 20, 32)
+        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+        
+        local bar = Instance.new("Frame", card)
+        bar.Size = UDim2.new(0, 4, 0, 30)
+        bar.Position = UDim2.new(0, 10, 0.5, -15)
+        bar.BackgroundColor3 = color
+        Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 2)
+        
+        local titleLbl = Instance.new("TextLabel", card)
+        titleLbl.Size = UDim2.new(1, -25, 0, 16)
+        titleLbl.Position = UDim2.new(0, 22, 0, 8)
+        titleLbl.BackgroundTransparency = 1
+        titleLbl.Text = title
+        titleLbl.TextColor3 = Color3.fromRGB(130, 130, 150)
+        titleLbl.Font = Enum.Font.Gotham
+        titleLbl.TextSize = 10
+        titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+        
+        local valueLbl = Instance.new("TextLabel", card)
+        valueLbl.Size = UDim2.new(1, -25, 0, 24)
+        valueLbl.Position = UDim2.new(0, 22, 0, 22)
+        valueLbl.BackgroundTransparency = 1
+        valueLbl.Text = "0"
+        valueLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+        valueLbl.Font = Enum.Font.GothamBold
+        valueLbl.TextSize = 18
+        valueLbl.TextXAlignment = Enum.TextXAlignment.Left
+        
+        return valueLbl
+    end
+    
+    -- Create Tabs
+    local MainTab = CreateTab("Main", 0)
+    local SettingsTab = CreateTab("Settings", 1)
+    local StatsTab = CreateTab("Stats", 2)
+    
+    CurrentTab = MainTab
+    MainTab.Visible = true
+    Tabs[1].Button.BackgroundColor3 = Color3.fromRGB(40, 40, 65)
+    Tabs[1].Button.TextColor3 = Color3.fromRGB(0, 220, 255)
+    
+    -- Main Tab
+    CreateToggle(MainTab, "Auto Tap", "AutoTap")
+    CreateToggle(MainTab, "Teleport", "TapTeleport")
+    CreateToggle(MainTab, "Auto Collect", "AutoCollect")
+    CreateToggle(MainTab, "Anti AFK", "AntiAFK")
+    CreateToggle(MainTab, "Priority Small", "PRIORITY_SMALL")
+    
+    -- Settings Tab
+    CreateSlider(SettingsTab, "Push Speed", "VELOCITY_SPEED", 50, 500, 200)
+    CreateSlider(SettingsTab, "Tap Power", "BASE_BURST", 10, 200, 50)
+    CreateSlider(SettingsTab, "Range", "RANGE", 1000, 20000, 5000)
+    CreateSlider(SettingsTab, "TP Height", "TELEPORT_HEIGHT", 2, 15, 4)
+    
+    -- Stats Tab
+    local orbsStat = CreateStat(StatsTab, "Orbs Collected", Color3.fromRGB(0, 255, 120), 6)
+    local lootStat = CreateStat(StatsTab, "Lootbags", Color3.fromRGB(255, 170, 0), 66)
+    local tapsStat = CreateStat(StatsTab, "Total Taps", Color3.fromRGB(255, 70, 70), 126)
+    local timeStat = CreateStat(StatsTab, "Session Time", Color3.fromRGB(170, 100, 255), 186)
+    
+    -- Update Stats
+    task.spawn(function()
+        while true do
+            orbsStat.Text = tostring(Stats.Orbs)
+            lootStat.Text = tostring(Stats.Lootbags)
+            tapsStat.Text = tostring(Stats.Taps)
+            
+            local elapsed = tick() - Stats.Start
+            timeStat.Text = string.format("%02d:%02d", math.floor(elapsed / 60), math.floor(elapsed % 60))
+            
+            wait(0.2)
+        end
+    end)
+    
+    -- Controls
+    closeBtn.MouseButton1Click:Connect(function() gui:Destroy() end)
+    
+    local minimized = false
+    minBtn.MouseButton1Click:Connect(function()
+        minimized = not minimized
+        TweenService:Create(main, TweenInfo.new(0.25), {
+            Size = minimized and UDim2.new(0, 400, 0, 45) or UDim2.new(0, 400, 0, 300)
+        }):Play()
+        content.Visible = not minimized
+        sidebar.Visible = not minimized
+        minBtn.Text = minimized and "+" or "−"
+    end)
+    
+    -- Drag
+    local dragging, dragStart, startPos = false, nil, nil
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging, dragStart, startPos = true, input.Position, main.Position
+        end
+    end)
+    header.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+    end)
+    
+    -- Toggle Key
+    UserInputService.InputBegan:Connect(function(input, gp)
+        if not gp and input.KeyCode == Enum.KeyCode.RightShift then
+            main.Visible = not main.Visible
+        end
+    end)
+    
+    print("✅ AirFlow Natural Loaded!")
+    print("🚀 Push System: Velocity toward player")
+    print("🛑 Stop at 2 studs - Let server collect naturally")
+    print("🔧 Press RightShift to toggle GUI")
 end)
