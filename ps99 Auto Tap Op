@@ -1,190 +1,178 @@
 pcall(function()
 
---// SERVICES
+-- SERVICES
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local WS = game:GetService("Workspace")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local Player = Players.LocalPlayer
 
---// REMOTES
+-- REMOTES
 local Net = RS:WaitForChild("Network")
 local DamageRemote = Net:WaitForChild("Breakables_PlayerDealDamage")
+local CollectRemote = Net:WaitForChild("Orbs: Collect")
 
---// WORLD
+-- WORLD
 local Breakables = WS:WaitForChild("__THINGS"):WaitForChild("Breakables")
+local Orbs = WS:WaitForChild("__THINGS"):WaitForChild("Orbs")
+local Lootbags = WS:WaitForChild("__THINGS"):WaitForChild("Lootbags")
 
---// SETTINGS
-local Settings = {
-    Enabled = false,
-    RiskMode = false,
-    Range = 3500
-}
+-- STATE
+local AutoTap = false
+local TapTeleport = false
+local AutoCollect = false
 
-local Cache = {}
-local pointer = 1
-local lastFire = 0
+-- SETTINGS
+local RANGE = 5000
+local BASE_BURST = 25
 
---// TARGET
-local function UpdateTargets()
-    table.clear(Cache)
+-- CHARACTER
+local function GetRoot()
+    local char = Player.Character or Player.CharacterAdded:Wait()
+    return char:WaitForChild("HumanoidRootPart")
+end
 
-    local char = Player.Character
-    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
-
-    local pos = hrp.Position
+-- 🧠 SMART TARGET
+local function GetTarget()
+    local best, bestScore = nil, math.huge
+    local root = GetRoot()
 
     for _, v in ipairs(Breakables:GetChildren()) do
-        local hit = v:FindFirstChild("Hitbox", true)
-        if hit then
-            local dist = (pos - hit.Position).Magnitude
-            if dist < Settings.Range then
-                table.insert(Cache, {obj=v, dist=dist})
+        local hitbox = v:FindFirstChild("Hitbox", true)
+        if hitbox then
+            local dist = (root.Position - hitbox.Position).Magnitude
+            if dist <= RANGE then
+                local hpObj = v:FindFirstChild("Health", true)
+                local hp = hpObj and hpObj.Value or 999999
+
+                local score = hp + (dist * 2)
+
+                if score < bestScore then
+                    bestScore = score
+                    best = v
+                end
             end
         end
     end
 
-    table.sort(Cache, function(a,b)
-        return a.dist < b.dist
-    end)
+    return best
 end
 
---// 🔥 AIRFLOW CORE (UPGRADED)
-local function Airflow()
-    if not Settings.Enabled then return end
+-- 💀 AUTO TAP
+RunService.Heartbeat:Connect(function()
+    if not AutoTap then return end
 
-    local delay = Settings.RiskMode and 0.03 or 0.065
-    if tick() - lastFire < delay then return end
-    lastFire = tick()
+    local target = GetTarget()
+    if not target then return end
 
-    UpdateTargets()
-    local count = #Cache
-    if count == 0 then return end
+    local hitbox = target:FindFirstChild("Hitbox", true)
+    if not hitbox then return end
 
-    -- 🎯 إعدادات ذكية
-    local burst = Settings.RiskMode and math.clamp(count * 1.5, 40, 90) or 25
-    local flow = Settings.RiskMode and math.clamp(count * 3, 80, 160) or 45
-
-    -- 🔥 Burst مركز
-    local main = Cache[1]
-    if main then
-        for i = 1, burst do
-            DamageRemote:FireServer(main.obj.Name)
-        end
+    if TapTeleport then
+        pcall(function()
+            GetRoot().CFrame = hitbox.CFrame + Vector3.new(0,3,0)
+        end)
     end
 
-    -- 🌊 Flow توزيع سريع
-    for i = 1, flow do
-        local t = Cache[pointer]
+    local hpObj = target:FindFirstChild("Health", true)
+    local hp = hpObj and hpObj.Value or 999999
 
-        if not t then
-            pointer = 1
-            t = Cache[pointer]
-        end
-
-        if t then
-            DamageRemote:FireServer(t.obj.Name)
-        end
-
-        pointer += 1
-        if pointer > count then pointer = 1 end
+    local burst = BASE_BURST
+    if hp < 5000 then
+        burst = BASE_BURST * 2
+    elseif hp < 20000 then
+        burst = BASE_BURST * 1.5
     end
 
-    -- ⚡ Boost إضافي خفيف (Risk فقط)
-    if Settings.RiskMode and count > 3 then
-        for i = 1, 10 do
-            local rand = Cache[math.random(1, math.min(count, 5))]
-            if rand then
-                DamageRemote:FireServer(rand.obj.Name)
-            end
-        end
+    for i = 1, burst do
+        pcall(function()
+            DamageRemote:FireServer(target.Name)
+        end)
     end
-end
-
---// UI
-local gui = Instance.new("ScreenGui", game.CoreGui)
-gui.Name = "AirflowMini"
-
-local main = Instance.new("Frame", gui)
-main.Size = UDim2.new(0, 220, 0, 140)
-main.Position = UDim2.new(0.5, -110, 0.5, -70)
-main.BackgroundColor3 = Color3.fromRGB(18,18,26)
-main.Active = true
-main.Draggable = true
-
-Instance.new("UICorner", main).CornerRadius = UDim.new(0,10)
-
-local stroke = Instance.new("UIStroke", main)
-stroke.Color = Color3.fromRGB(120,170,255)
-stroke.Transparency = 0.5
-stroke.Thickness = 1.2
-
---// 🌈 TITLE (ULTRA SMOOTH RAINBOW)
-
-local title = Instance.new("TextLabel", main)
-title.Size = UDim2.new(1,0,0,30)
-title.BackgroundTransparency = 1
-title.Text = "Auto Tap Hub"
-title.TextScaled = true
-title.Font = Enum.Font.GothamBold
-title.TextColor3 = Color3.new(1,1,1)
-
-local rainbow = Instance.new("UIGradient", title)
-rainbow.Rotation = 45
-
-local hue = 0
-
-RunService.RenderStepped:Connect(function(dt)
-    hue += dt * 0.15 -- أبطأ = أفخم
-
-    if hue > 1 then hue -= 1 end
-
-    rainbow.Color = ColorSequence.new{
-        ColorSequenceKeypoint.new(0, Color3.fromHSV(hue,1,1)),
-        ColorSequenceKeypoint.new(0.5, Color3.fromHSV((hue+0.15)%1,1,1)),
-        ColorSequenceKeypoint.new(1, Color3.fromHSV((hue+0.3)%1,1,1))
-    }
 end)
 
---// BUTTONS
+-- 💰 AUTO COLLECT
+task.spawn(function()
+    while true do
+        if AutoCollect then
+            local ids = {}
 
-local function createButton(text, y, callback)
-    local btn = Instance.new("TextButton", main)
-    btn.Size = UDim2.new(1,-20,0,40)
+            for _, orb in ipairs(Orbs:GetChildren()) do
+                local id = tonumber(orb.Name)
+                if id then
+                    table.insert(ids, id)
+                    orb:Destroy()
+                end
+            end
+
+            if #ids > 0 then
+                pcall(function()
+                    CollectRemote:FireServer(ids)
+                end)
+            end
+
+            for _, bag in ipairs(Lootbags:GetChildren()) do
+                bag:Destroy()
+            end
+        end
+
+        task.wait(0.1)
+    end
+end)
+
+-- ⚡ Collect عند السبون
+Orbs.ChildAdded:Connect(function(orb)
+    if AutoCollect then
+        task.wait()
+        local id = tonumber(orb.Name)
+        if id then
+            pcall(function()
+                CollectRemote:FireServer({id})
+            end)
+            orb:Destroy()
+        end
+    end
+end)
+
+-- 🖥️ GUI بسيط
+local gui = Instance.new("ScreenGui", game.CoreGui)
+gui.Name = "ARBIX_SIMPLE"
+
+local frame = Instance.new("Frame", gui)
+frame.Size = UDim2.new(0, 260, 0, 170)
+frame.Position = UDim2.new(0.5,-130,0.5,-85)
+frame.BackgroundColor3 = Color3.fromRGB(25,25,35)
+frame.Active = true
+frame.Draggable = true
+Instance.new("UICorner", frame)
+
+local title = Instance.new("TextLabel", frame)
+title.Size = UDim2.new(1,0,0,30)
+title.BackgroundTransparency = 1
+title.Text = "ARBIX SIMPLE"
+title.TextColor3 = Color3.new(1,1,1)
+title.TextScaled = true
+
+local function Button(name, y, callback)
+    local btn = Instance.new("TextButton", frame)
+    btn.Size = UDim2.new(1,-20,0,35)
     btn.Position = UDim2.new(0,10,0,y)
-    btn.Text = text.." : OFF"
-    btn.TextColor3 = Color3.fromRGB(255,255,255)
     btn.BackgroundColor3 = Color3.fromRGB(40,40,60)
-
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+    btn.TextColor3 = Color3.new(1,1,1)
+    btn.Text = name..": OFF"
+    Instance.new("UICorner", btn)
 
     local state = false
-
     btn.MouseButton1Click:Connect(function()
         state = not state
-
-        btn.Text = text.." : "..(state and "ON" or "OFF")
-
-        TweenService:Create(btn, TweenInfo.new(0.2), {
-            BackgroundColor3 = state and Color3.fromRGB(70,140,255) or Color3.fromRGB(40,40,60)
-        }):Play()
-
+        btn.Text = name..": "..(state and "ON" or "OFF")
         callback(state)
     end)
 end
 
-createButton("ENABLE", 35, function(v)
-    Settings.Enabled = v
-end)
-
-createButton("OP MODE", 80, function(v)
-    Settings.RiskMode = v
-end)
-
---// LOOP
-RunService.Heartbeat:Connect(Airflow)
+Button("Auto Tap", 45, function(v) AutoTap = v end)
+Button("Teleport", 85, function(v) TapTeleport = v end)
+Button("Auto Collect", 125, function(v) AutoCollect = v end)
 
 end)
