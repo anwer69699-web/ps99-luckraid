@@ -8,134 +8,133 @@ pcall(function()
     
     local Player = Players.LocalPlayer
     local Net = RS:WaitForChild("Network")
-    local DamageRemote = Net:WaitForChild("Breakables_PlayerDealDamage")
     
     -- CLEANUP
-    if CoreGui:FindFirstChild("STEALTH_POWER_V5") then CoreGui.STEALTH_POWER_V5:Destroy() end
+    if CoreGui:FindFirstChild("STEALTH_BILLBOARD_V4") then CoreGui.STEALTH_BILLBOARD_V4:Destroy() end
 
     -- SETTINGS
     local Settings = {
         Visible = true,
         AutoTap = false,
         Teleport = false,
+        AutoEgg = false,
         TP_Delay = 2,
-        LastTP = 0,
-        CurrentTarget = nil
+        LastTP = tick()
     }
 
     -- ═══════════════════════════════════════════════════════════════
-    --                     UI CONSTRUCTION
+    --                     UI SETUP (MINIMAL)
     -- ═══════════════════════════════════════════════════════════════
     local gui = Instance.new("ScreenGui", CoreGui)
-    gui.Name = "STEALTH_POWER_V5"
+    gui.Name = "STEALTH_BILLBOARD_V4"
 
     local main = Instance.new("Frame", gui)
-    main.Size = UDim2.new(0, 180, 0, 140)
-    main.Position = UDim2.new(0.5, -90, 0.5, -70)
-    main.BackgroundColor3 = Color3.fromRGB(10, 10, 12)
-    main.BorderSizePixel = 0
+    main.Size = UDim2.new(0, 180, 0, 180)
+    main.Position = UDim2.new(0.5, -90, 0.5, -90)
+    main.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     main.Active = true
     main.Draggable = true
-    Instance.new("UICorner", main).CornerRadius = UDim.new(0, 8)
-
-    -- Glow Effect (اللمعة)
-    local stroke = Instance.new("UIStroke", main)
-    stroke.Color = Color3.fromRGB(0, 255, 150)
-    stroke.Thickness = 1.5
+    Instance.new("UICorner", main)
 
     local title = Instance.new("TextLabel", main)
     title.Size = UDim2.new(1, 0, 0, 35)
-    title.Text = "STEALTH POWER V5"
-    title.TextColor3 = Color3.fromRGB(0, 255, 150)
+    title.Text = "ZEKROM STYLE - BILLBOARD"
+    title.TextColor3 = Color3.fromRGB(255, 200, 0)
     title.Font = Enum.Font.GothamBold
-    title.TextSize = 13
+    title.TextSize = 10
     title.BackgroundTransparency = 1
 
     -- ═══════════════════════════════════════════════════════════════
-    --                     CORE LOGIC (STABLE & POWERFUL)
+    --                     BILLBOARD LOGIC (ZEKROM HUB STYLE)
     -- ═══════════════════════════════════════════════════════════════
+    local function GetEggFromBillboard()
+        local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+        local things = WS:FindFirstChild("__THINGS")
+        local nearestEgg = nil
+        local minDist = 50 -- المسافة التي طلبتها (50 ستود)
+
+        if root and things and things:FindFirstChild("Eggs") then
+            for _, eggModel in pairs(things.Eggs:GetChildren()) do
+                -- البحث عن BillboardGui داخل موديل البيضة
+                local billboard = eggModel:FindFirstChildWhichIsA("BillboardGui", true)
+                if billboard then
+                    local dist = (eggModel.Position - root.Position).Magnitude
+                    if dist < minDist then
+                        minDist = dist
+                        nearestEgg = eggModel.Name
+                    end
+                end
+            end
+        end
+        return nearestEgg
+    end
+
     task.spawn(function()
         while true do
-            if Settings.AutoTap then
-                pcall(function()
-                    local char = Player.Character
-                    local root = char and char:FindFirstChild("HumanoidRootPart")
-                    
-                    if root then
-                        -- البحث عن أقرب تكسيرة (Breakable)
-                        local target = nil
-                        local minDist = 1500 -- مدى البحث
-                        
-                        local breakables = WS.__THINGS.Breakables:GetChildren()
-                        for _, v in pairs(breakables) do
-                            local hitbox = v:FindFirstChild("Hitbox", true)
-                            if hitbox then
-                                local d = (root.Position - hitbox.Position).Magnitude
-                                if d < minDist then
-                                    minDist = d
-                                    target = v
-                                end
-                            end
-                        end
-
-                        if target then
-                            local hitbox = target:FindFirstChild("Hitbox", true)
-                            
-                            -- نظام التليبورت المنظم (كل ثانيتين)
-                            if Settings.Teleport and (tick() - Settings.LastTP) >= Settings.TP_Delay then
-                                root.CFrame = hitbox.CFrame * CFrame.new(0, 1, 0)
-                                Settings.LastTP = tick()
-                            end
-
-                            -- قوة الضرب (إرسال طلبات مكثفة ومستقرة للسيرفر)
-                            -- تم ضبط العدد ليكون قوياً جداً دون التسبب في Kick
-                            for i = 1, 15 do
-                                DamageRemote:FireServer(target.Name)
-                            end
+            pcall(function()
+                local root = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+                
+                -- نظام الضرب والنقل (كل ثانيتين)
+                if Settings.AutoTap and root then
+                    local target = nil
+                    local dist = 1000
+                    for _, v in pairs(WS.__THINGS.Breakables:GetChildren()) do
+                        local h = v:FindFirstChild("Hitbox", true)
+                        if h then
+                            local d = (root.Position - h.Position).Magnitude
+                            if d < dist then dist = d; target = v end
                         end
                     end
-                end)
-            end
-            task.wait(0.01) -- سرعة التكرار القصوى للاستقرار
+                    if target then
+                        if Settings.Teleport and (tick() - Settings.LastTP) >= Settings.TP_Delay then
+                            root.CFrame = target:FindFirstChild("Hitbox", true).CFrame * CFrame.new(0, 1, 0)
+                            Settings.LastTP = tick()
+                        end
+                        Net.Breakables_PlayerDealDamage:FireServer(target.Name)
+                    end
+                end
+                
+                -- نظام فتح البيض عبر الـ Billboard
+                if Settings.AutoEgg then
+                    local eggName = GetEggFromBillboard()
+                    if eggName then
+                        -- إرسال أمر الشراء للسيرفر
+                        Net.Eggs_RequestPurchase:InvokeServer(eggName, 1)
+                        task.wait(0.2)
+                    end
+                end
+            end)
+            task.wait(0.05)
         end
     end)
 
     -- ═══════════════════════════════════════════════════════════════
-    --                     CONTROLS & BUTTONS
+    --                     UI CONTROLS
     -- ═══════════════════════════════════════════════════════════════
+    UIS.InputBegan:Connect(function(input, gpe)
+        if not gpe and input.KeyCode == Enum.KeyCode.RightControl then
+            main.Visible = not main.Visible
+        end
+    end)
+
     local function CreateToggle(txt, pos, key)
         local b = Instance.new("TextButton", main)
         b.Size = UDim2.new(0, 160, 0, 35)
         b.Position = UDim2.new(0.5, -80, 0, pos)
-        b.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-        b.TextColor3 = Color3.fromRGB(200, 200, 200)
+        b.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
+        b.TextColor3 = Color3.new(0.9, 0.9, 0.9)
         b.Font = Enum.Font.GothamBold
-        b.TextSize = 12
-        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
-        
-        local function Update()
+        Instance.new("UICorner", b)
+        local function Upd()
             b.Text = txt .. ": " .. (Settings[key] and "ON" or "OFF")
-            b.TextColor3 = Settings[key] and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 150, 150)
-            b.BackgroundColor3 = Settings[key] and Color3.fromRGB(0, 150, 80) or Color3.fromRGB(25, 25, 30)
+            b.BackgroundColor3 = Settings[key] and Color3.fromRGB(0, 180, 100) or Color3.fromRGB(40, 40, 50)
         end
-        
-        b.MouseButton1Click:Connect(function()
-            Settings[key] = not Settings[key]
-            Update()
-        end)
-        Update()
+        b.MouseButton1Click:Connect(function() Settings[key] = not Settings[key]; Upd() end)
+        Upd()
     end
 
-    CreateToggle("AUTO TAP MAX", 45, "AutoTap")
-    CreateToggle("TP (EVERY 2S)", 90, "Teleport")
+    CreateToggle("Auto Tap", 45, "AutoTap")
+    CreateToggle("TP (Every 2s)", 90, "Teleport")
+    CreateToggle("Auto Egg (Billboard)", 135, "AutoEgg")
 
-    -- مفتاح الإخفاء/الإظهار (RightControl)
-    UIS.InputBegan:Connect(function(input, gpe)
-        if not gpe and input.KeyCode == Enum.KeyCode.RightControl then
-            Settings.Visible = not Settings.Visible
-            main.Visible = Settings.Visible
-        end
-    end)
-    
-    print("✅ Stealth Power V5 Loaded - Maximum Stability")
 end)
